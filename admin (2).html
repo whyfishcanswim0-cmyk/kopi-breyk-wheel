@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Kopi Breyk Admin</title>
+<link rel="icon" href="logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wide">
+  <div class="brand"><span><img src="logo.png" alt="">Kopi Breyk admin</span><button id="out" hidden>Log out</button></div>
+  <section id="login">
+    <h2>Admin login</h2>
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+    <p class="err" id="lerr"></p><button class="btn" id="go" style="max-width:300px">Log in</button>
+  </section>
+
+  <section id="panel" hidden>
+    <div class="tabs t4" id="tabs"><button class="on" data-t="report">Today</button><button data-t="cust">Customers</button><button data-t="prz">Prizes</button><button data-t="set">Settings</button></div>
+
+    <div class="tab" id="t-report">
+      <div class="stat" id="stats"></div>
+      <h2 style="margin-top:28px">Prizes won today</h2><div id="won" class="small"></div>
+    </div>
+
+    <div class="tab" id="t-cust" hidden>
+      <div class="row"><div><input id="q" placeholder="Search name, username or mobile"></div><button class="btn ghost" id="csv">Download CSV</button></div>
+      <p class="small" style="margin-top:10px">Date colors: green = won, gold = redeemed, grey = no prize.</p>
+      <div class="scroll"><table><thead><tr><th>Customer</th><th>Contact</th><th>Visits / card</th><th>Dates visited</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+    </div>
+
+    <div class="tab" id="t-prz" hidden>
+      <p class="small">Weight = how likely (bigger wins more). Daily limit = max wins per day (leave blank for unlimited). Keep Try Again unticked under “Real prize”.</p>
+      <div class="scroll"><table><thead><tr><th>Name</th><th>Weight</th><th>Color</th><th>Real prize</th><th>On wheel</th><th>Daily limit</th><th></th></tr></thead><tbody id="przrows"></tbody></table></div>
+      <button class="btn ghost" id="addp">Add a prize</button>
+    </div>
+
+    <div class="tab" id="t-set" hidden>
+      <h2>Cafe Daily Code</h2>
+      <div class="row"><div><label for="code">Today’s code (4 digits)</label><input id="code" class="pin" inputmode="numeric" maxlength="4"></div>
+        <button class="btn ghost" id="rand">Random</button><button class="btn" id="save">Save code</button></div>
+      <h2 style="margin-top:30px">Cashier PIN</h2>
+      <p>Cashiers type this on the customer’s phone to confirm a prize.</p>
+      <div class="row"><div><input id="cpin" class="pin" inputmode="numeric" maxlength="4" placeholder="New 4 digits"></div><button class="btn" id="csave">Save PIN</button></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="config.js"></script>
+<script>
+let pw = sessionStorage.getItem('kb_admin') || '', players = [], prz = [];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const A = (fn, a) => rpc(fn, { p_pw: pw, ...a });
+
+async function loadAll() {
+  const [l, r, p] = await Promise.all([A('admin_list'), A('admin_report'), A('admin_prizes')]);
+  if (l.error) return l;
+  players = l.players; $('#code').value = l.code; prz = p.prizes;
+  $('#stats').innerHTML = [['Customers', r.customers], ['Checked in today', r.checkins], ['Spins', r.spins], ['Prizes won', r.wins], ['Prizes redeemed', r.redeemed], ['Free drinks given', r.free_drinks]].map(x => `<div><b>${x[1]}</b>${x[0]}</div>`).join('');
+  $('#won').innerHTML = r.prizes.map(x => `<span class="chip">${esc(x.prize)}: ${x.n}</span>`).join('') || 'No spins yet today.';
+  renderCust(); renderPrizes(); return l;
+}
+function renderCust() {
+  const q = $('#q').value.trim().toLowerCase();
+  const list = players.filter(p => [p.username, p.full_name, p.mobile].join(' ').toLowerCase().includes(q));
+  $('#rows').innerHTML = list.map(p => `<tr><td><b>${esc(p.username)}</b>${p.banned ? ' <span class="chip" style="background:#7a2f25">banned</span>' : ''}<br>${esc(p.full_name)}<br><span class="small">Bday ${esc(p.birthday) || '-'}</span></td>
+    <td>${esc(p.mobile) || '-'}<br><span class="small">${esc(p.email)}</span></td><td>${p.visits}<br><span class="small">${p.stamps} stamps<br>${p.rewards} free drinks</span></td>
+    <td>${p.dates.map(d => `<span class="chip ${d.redeemed ? 'red' : d.prize && d.prize !== 'Try Again' ? 'won' : ''}" title="${esc(d.prize || 'No spin yet')}">${d.d}</span>`).join('')}</td>
+    <td><button class="mini" data-a="stp" data-u="${esc(p.username)}">Stamps +/-</button><button class="mini" data-a="pin" data-u="${esc(p.username)}">Reset PIN</button><button class="mini" data-a="ban" data-b="${p.banned}" data-u="${esc(p.username)}">${p.banned ? 'Unban' : 'Ban'}</button><button class="mini bad" data-a="del" data-u="${esc(p.username)}">Delete</button></td></tr>`).join('')
+    || '<tr><td colspan="5">No customers yet.</td></tr>';
+}
+function prow(p) {
+  p = p || { id: '', label: '', weight: 1, color: '#f2c14e', is_win: true, active: true, daily_limit: '' };
+  return `<tr data-id="${p.id}"><td><input type="text" class="f-label" value="${esc(p.label)}"></td><td><input type="number" min="1" class="f-weight" value="${p.weight}" style="width:70px"></td>
+  <td><input type="color" class="f-color" value="${p.color}"></td><td><input type="checkbox" class="f-win" ${p.is_win ? 'checked' : ''}></td><td><input type="checkbox" class="f-act" ${p.active ? 'checked' : ''}></td>
+  <td><input type="number" min="1" class="f-lim" value="${p.daily_limit ?? ''}" style="width:70px"></td>
+  <td><button class="mini" data-a="psave">Save</button>${p.id ? '<button class="mini bad" data-a="pdel">Delete</button>' : ''}</td></tr>`;
+}
+const renderPrizes = () => $('#przrows').innerHTML = prz.map(prow).join('');
+$('#addp').onclick = () => $('#przrows').insertAdjacentHTML('beforeend', prow());
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return; const a = b.dataset.a, u = b.dataset.u;
+  if (a === 'pin') { const n = prompt('New 4-digit PIN for ' + u + ':'); if (!n) return; const r = await A('admin_reset_pin', { p_user: u, p_pin: n }); toast(r.error || 'PIN reset for ' + u); }
+  if (a === 'stp') { const n = prompt('Add or remove stamps for ' + u + '. Type 1 to add one, -1 to remove one:'); if (!n || isNaN(+n)) return; await A('admin_adjust_stamps', { p_user: u, p_delta: +n }); await loadAll(); toast('Stamps updated'); }
+  if (a === 'ban') { await A('admin_ban', { p_user: u, p_flag: b.dataset.b !== 'true' }); await loadAll(); }
+  if (a === 'del') { if (!confirm('Delete ' + u + ' and all their visits? This can’t be undone.')) return; await A('admin_delete_player', { p_user: u }); await loadAll(); toast('Deleted ' + u); }
+  if (a === 'psave') { const r = b.closest('tr'), id = r.dataset.id, lim = r.querySelector('.f-lim').value;
+    const res = await A('admin_save_prize', { p_id: id ? +id : null, p_label: r.querySelector('.f-label').value, p_weight: +r.querySelector('.f-weight').value, p_color: r.querySelector('.f-color').value, p_is_win: r.querySelector('.f-win').checked, p_active: r.querySelector('.f-act').checked, p_limit: lim ? +lim : null });
+    if (res.error) return toast(res.error); toast('Prize saved'); await loadAll(); }
+  if (a === 'pdel') { if (!confirm('Delete this prize?')) return; await A('admin_delete_prize', { p_id: +b.closest('tr').dataset.id }); await loadAll(); }
+});
+
+$('#tabs').onclick = e => { const t = e.target.dataset.t; if (!t) return;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === e.target));
+  document.querySelectorAll('.tab').forEach(x => x.hidden = x.id !== 't-' + t); };
+$('#q').oninput = renderCust;
+$('#csv').onclick = () => {
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const rows = [['Username', 'Full name', 'Mobile', 'Email', 'Birthday', 'Visits', 'Dates']].concat(players.map(p => [p.username, p.full_name, p.mobile, p.email, p.birthday, p.visits, p.dates.map(d => d.d).join(' ')]));
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\n')], { type: 'text/csv' }));
+  a.download = 'kopi-breyk-customers.csv'; a.click();
+};
+$('#rand').onclick = () => $('#code').value = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+$('#save').onclick = async () => { const r = await A('admin_set_code', { p_code: $('#code').value }); toast(r.error || 'Daily code saved: ' + r.code); };
+$('#csave').onclick = async () => { const r = await A('admin_set_cashier', { p_pin: $('#cpin').value }); toast(r.error || 'Cashier PIN saved'); if (!r.error) $('#cpin').value = ''; };
+
+async function enter() { const r = await loadAll(); if (r.error) return r; $('#login').hidden = true; $('#panel').hidden = false; $('#out').hidden = false; return r; }
+$('#go').onclick = async () => { pw = $('#pw').value; $('#lerr').textContent = ''; const r = await enter(); if (r.error) { $('#lerr').textContent = r.error; return; } sessionStorage.setItem('kb_admin', pw); };
+$('#pw').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
+$('#out').onclick = () => { sessionStorage.removeItem('kb_admin'); location.reload(); };
+if (pw) enter().then(r => { if (r.error) sessionStorage.removeItem('kb_admin'); });
+</script>
+</body>
+</html>

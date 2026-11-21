@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4a0e1a">
+<title>Kopi Breyk Rewards</title>
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="brand"><span><img src="logo.png" alt="">Kopi Breyk</span><button id="logout" hidden>Log out</button></div>
+
+  <section class="screen" id="s-auth" hidden>
+    <h1>Welcome to Kopi Breyk Rewards</h1>
+    <p>Collect stamps, earn a free drink, and spin for treats.</p>
+    <div class="tabs"><button class="on" data-mode="login">Log in</button><button data-mode="signup">Sign up</button></div>
+    <label for="u">Username</label>
+    <input id="u" autocomplete="username" autocapitalize="none" autocorrect="off" maxlength="20">
+    <label for="p">4-digit PIN</label>
+    <input id="p" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password">
+    <div id="su" hidden>
+      <label for="nm">Full name</label><input id="nm" autocomplete="name">
+      <label for="mb">Mobile number</label><input id="mb" type="tel" inputmode="tel" placeholder="09171234567" autocomplete="tel">
+      <label for="bd">Birthday</label><input id="bd" type="date">
+      <label for="em">Email (optional)</label><input id="em" type="email" autocomplete="email">
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:.88rem;color:var(--mut)"><input id="cs" type="checkbox" style="margin-top:3px">I agree that Kopi Breyk may keep my details to run this rewards program and send me offers. I can ask to have them deleted anytime.</label>
+    </div>
+    <p class="err" id="auth-err"></p>
+    <button class="btn" id="auth-go">Log in</button>
+  </section>
+
+  <section class="screen" id="s-code" hidden>
+    <h2>Welcome, <span class="who"></span></h2>
+    <p>Ask the cashier for today’s Cafe Daily Code to add today’s stamp and unlock your spin.</p>
+    <div class="card"><h2>Your stamp card</h2><div class="stamps"></div><p class="cardtxt"></p></div>
+    <label for="code">Cafe Daily Code</label>
+    <input id="code" class="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off">
+    <p class="err" id="code-err"></p>
+    <button class="btn" id="code-go">Add today’s stamp</button>
+  </section>
+
+  <section class="screen" id="s-home" hidden>
+    <h2>Hello, <span class="who"></span></h2>
+    <div class="card"><h2>Your stamp card</h2><div class="stamps"></div><p class="cardtxt"></p></div>
+    <div class="free-box" id="freebox" hidden><b>Your free drink is ready</b>Show this to the cashier.<button class="btn" id="claim-go">Redeem free drink</button></div>
+    <div class="row2"><h2>Today’s spin</h2><p id="spin-txt"></p><p class="bonus" id="bonus-note" hidden></p><button class="btn" id="to-wheel">Spin the wheel</button></div>
+    <details class="hist"><summary>My visits</summary><div class="hl"></div></details>
+  </section>
+
+  <section class="screen" id="s-wheel" hidden>
+    <button class="back" data-home>‹ Back</button>
+    <h2>Spin the wheel</h2>
+    <p>One spin per day. Good luck!</p>
+    <div class="stage"><div class="pointer"></div><canvas id="wheel" width="720" height="720"></canvas><div class="hub"></div></div>
+    <button class="btn" id="spin-go">Spin</button>
+  </section>
+
+  <section class="screen" id="s-prize" hidden>
+    <button class="back" data-home>‹ Back</button>
+    <div class="ticket">
+      <p id="pz-top"></p>
+      <div class="prize" id="pz-name"></div>
+      <p id="pz-sub"></p>
+      <div id="pz-live">
+        <div class="clock"><b id="clk">--:--:--</b><span id="clk-date"></span><div class="live"></div></div>
+        <p class="small" style="margin-top:10px;color:#7a4a52">Cashier: check that the clock is ticking, then tap below.</p>
+      </div>
+      <div id="pz-done" hidden><div class="done">REDEEMED</div><p id="pz-done-at"></p></div>
+    </div>
+    <button class="btn" id="redeem-go">Mark as Redeemed</button>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script src="config.js"></script>
+<script>
+let creds = JSON.parse(localStorage.getItem('kb_creds') || 'null');
+let prizes = [], st = null, rot = 0, spinning = false, mode = 'login', tick = null, fresh = false;
+const fmt = o => new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', ...o });
+const call = (fn, extra) => rpc(fn, { p_user: creds.u, p_pin: creds.p, ...extra });
+const show = id => { document.querySelectorAll('.screen').forEach(e => e.hidden = e.id !== id); $('#logout').hidden = id === 's-auth'; window.scrollTo(0, 0); };
+const all = (s, f) => document.querySelectorAll(s).forEach(f);
+
+function logout() { localStorage.removeItem('kb_creds'); creds = null; clearInterval(tick); show('s-auth'); }
+$('#logout').onclick = logout;
+all('[data-home]', b => b.onclick = () => { clearInterval(tick); route(st); });
+
+// ---- sign up / log in ----
+all('.tabs button', b => b.onclick = () => {
+  mode = b.dataset.mode;
+  all('.tabs button', x => x.classList.toggle('on', x === b));
+  $('#auth-go').textContent = mode === 'login' ? 'Log in' : 'Create account';
+  $('#auth-err').textContent = ''; $('#su').hidden = mode !== 'signup';
+});
+$('#auth-go').onclick = async () => {
+  const u = $('#u').value.trim(), p = $('#p').value; $('#auth-err').textContent = '';
+  if (!u || !/^\d{4}$/.test(p)) { $('#auth-err').textContent = 'Enter a username and a 4-digit PIN.'; return; }
+  const su = { p_user: u, p_pin: p, p_name: $('#nm').value, p_mobile: $('#mb').value, p_birthday: $('#bd').value || null, p_email: $('#em').value, p_consent: $('#cs').checked };
+  $('#auth-go').disabled = true;
+  const r = mode === 'login' ? await rpc('get_status', { p_user: u, p_pin: p }) : await rpc('signup', su);
+  $('#auth-go').disabled = false;
+  if (r.error) { $('#auth-err').textContent = r.error; return; }
+  creds = { u: r.username, p }; localStorage.setItem('kb_creds', JSON.stringify(creds)); $('#p').value = ''; route(r);
+};
+
+// ---- routing ----
+async function route(s) {
+  if (!creds) return show('s-auth');
+  if (!s) { s = await call('get_status'); if (s.error) { logout(); toast(s.error); return; } }
+  st = s; renderCard(); all('.who', e => e.textContent = (s.name || s.username).split(' ')[0]);
+  if (!s.today.checked_in) { show('s-code'); $('#code').value = ''; } else { renderHome(); show('s-home'); }
+}
+function renderCard() {
+  const g = st.goal || 8, n = st.stamps;
+  const cells = [...Array(g)].map((_, i) => `<div class="${i + 1 === g ? 'free ' : ''}${i < n ? 'on ' : ''}${fresh && i + 1 === Math.min(n, g) ? 'pop' : ''}">${i < n ? 'KB' : i + 1 === g ? 'Free' : i + 1}</div>`).join('');
+  const left = g - n;
+  all('.stamps', e => e.innerHTML = cells);
+  all('.cardtxt', e => e.textContent = left <= 0 ? 'Your free drink is ready!' : `${left} more stamp${left === 1 ? '' : 's'} to your free drink`);
+  all('.hl', e => e.innerHTML = st.history.map(h => `<div class="hrow"><span>${h.d}</span><span>${h.prize ? h.prize + (h.redeemed ? ' (claimed)' : '') : 'Stamp only'}</span></div>`).join('') || '<p class="small">No visits yet.</p>');
+  fresh = false;
+}
+function renderHome() {
+  const t = st.today, g = st.goal || 8;
+  $('#freebox').hidden = st.stamps < g;
+  const b = $('#bonus-note'); b.hidden = !t.bonus || !!t.prize; b.textContent = 'Birthday bonus! Your spin today is a guaranteed prize.';
+  $('#spin-txt').textContent = t.prize ? (t.is_win ? `Today you won: ${t.prize}` : 'No prize today. Try again tomorrow!') : 'You have one spin today.';
+  $('#to-wheel').textContent = t.prize ? 'View my prize' : 'Spin the wheel';
+  $('#to-wheel').hidden = t.prize && !t.is_win;
+}
+
+// ---- check-in (adds the stamp) ----
+$('#code-go').onclick = async () => {
+  const c = $('#code').value; $('#code-err').textContent = '';
+  if (!/^\d{4}$/.test(c)) { $('#code-err').textContent = 'The code is 4 digits.'; return; }
+  $('#code-go').disabled = true; const r = await call('checkin', { p_code: c }); $('#code-go').disabled = false;
+  if (r.error) { $('#code-err').textContent = r.error; return; }
+  fresh = true; route(r);
+};
+
+// ---- free drink ----
+$('#claim-go').onclick = async () => {
+  const c = prompt('Cashier only: enter the cashier PIN to give the free drink.'); if (!c) return;
+  const r = await call('claim_reward', { p_cashier: c });
+  if (r.error) { toast(r.error); return; }
+  toast('Free drink redeemed. Enjoy!'); route(r);
+};
+
+// ---- wheel ----
+$('#to-wheel').onclick = async () => { if (st.today.prize) return showPrize(); await loadWheel(); show('s-wheel'); };
+async function loadWheel() {
+  if (!prizes.length) { const r = await rpc('get_prizes'); if (r.error) { toast(r.error); return; } prizes = r; }
+  drawWheel();
+}
+function inkFor(hex) { const n = parseInt(hex.slice(1), 16), l = .299 * (n >> 16) + .587 * (n >> 8 & 255) + .114 * (n & 255); return l > 140 ? '#3a0a14' : '#f6ecd8'; }
+function drawWheel() {
+  const c = $('#wheel'), x = c.getContext('2d'), S = c.width, R = S / 2, n = prizes.length, seg = 2 * Math.PI / n;
+  x.clearRect(0, 0, S, S);
+  prizes.forEach((p, i) => {
+    const a = -Math.PI / 2 + i * seg;
+    x.beginPath(); x.moveTo(R, R); x.arc(R, R, R - 4, a, a + seg); x.closePath();
+    x.fillStyle = p.color; x.fill(); x.strokeStyle = '#3a0a14'; x.lineWidth = 4; x.stroke();
+    x.save(); x.translate(R, R); x.rotate(a + seg / 2);
+    x.textAlign = 'right'; x.fillStyle = inkFor(p.color); x.font = '700 50px "Cormorant Garamond", Georgia, serif';
+    x.fillText(p.label, R - 46, 16); x.restore();
+  });
+}
+$('#spin-go').onclick = async () => {
+  if (spinning) return; spinning = true; $('#spin-go').disabled = true;
+  const r = await call('spin');
+  if (r.error) { toast(r.error); spinning = false; $('#spin-go').disabled = false; if (/already|Daily Code/.test(r.error)) route(); return; }
+  const i = prizes.findIndex(p => p.id === r.prize_id), seg = 360 / prizes.length;
+  const target = -(i + .5) * seg + (Math.random() - .5) * seg * .6;
+  const cur = ((rot % 360) + 360) % 360, delta = (((target - cur) % 360) + 360) % 360;
+  rot += 360 * 6 + delta; $('#wheel').style.transform = `rotate(${rot}deg)`;
+  setTimeout(() => { spinning = false; $('#spin-go').disabled = false; st = r; renderCard(); showPrize(); }, 5400);
+};
+
+// ---- prize + live clock ----
+function showPrize() {
+  const t = st.today; show('s-prize'); clearInterval(tick);
+  $('#pz-name').textContent = t.prize;
+  if (!t.is_win) {
+    $('#pz-top').textContent = 'Not this time'; $('#pz-sub').textContent = 'You’ve used today’s spin. Come back tomorrow!';
+    $('#pz-live').hidden = true; $('#pz-done').hidden = true; $('#redeem-go').hidden = true; return;
+  }
+  $('#pz-top').textContent = 'You won'; $('#redeem-go').hidden = t.redeemed;
+  if (t.redeemed) {
+    $('#pz-sub').textContent = st.username; $('#pz-live').hidden = true; $('#pz-done').hidden = false;
+    $('#pz-done-at').textContent = 'Claimed ' + fmt({ dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(t.redeemed_at)); return;
+  }
+  $('#pz-sub').textContent = `Show this screen to the cashier, ${st.username}.`;
+  $('#pz-live').hidden = false; $('#pz-done').hidden = true;
+  const upd = () => { const d = new Date();
+    $('#clk').textContent = fmt({ hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(d);
+    $('#clk-date').textContent = fmt({ weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(d); };
+  upd(); tick = setInterval(upd, 1000);
+}
+$('#redeem-go').onclick = async () => {
+  const c = prompt('Cashier only: enter the cashier PIN to mark this prize as redeemed. This can’t be undone.'); if (!c) return;
+  const r = await call('redeem', { p_cashier: c });
+  if (r.error) { toast(r.error); return; }
+  st = r; showPrize();
+};
+
+route();
+</script>
+</body>
+</html>
